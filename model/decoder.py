@@ -58,16 +58,17 @@ class SDFNet(nn.Module):
     def __init__(self, config, input_ch=3, geo_feat_dim=15, hidden_dim=64, num_layers=2):
         super(SDFNet, self).__init__()
         self.config = config
-        self.input_ch = input_ch
+        self.input_ch = input_ch + 1
         self.geo_feat_dim = geo_feat_dim
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
 
         self.model = self.get_model(tcnn_network=config['decoder']['tcnn_network'])
     
-    def forward(self, x, return_geo=True):
-        out = self.model(x)
-
+    def forward(self, eval_tsdf, x, return_geo=True):
+        out = self.model(torch.cat((x,eval_tsdf),1))
+        # out = self.model(x)
+        
         if return_geo:  # return feature
             return out
         else:
@@ -161,9 +162,9 @@ class ColorSDFNet_v2(nn.Module):
     def forward(self, eval_tsdf, embed, embed_pos,view_dirs):
 
         if embed_pos is not None:
-            h = self.sdf_net(torch.cat([embed, embed_pos], dim=-1), return_geo=True) 
+            h = self.sdf_net(eval_tsdf,torch.cat([embed, embed_pos], dim=-1), return_geo=True) 
         else:
-            h = self.sdf_net(embed, return_geo=True) 
+            h = self.sdf_net(eval_tsdf,embed, return_geo=True) 
         
         sdf, geo_feat = h[...,:1], h[...,1:]
         if embed_pos is not None:

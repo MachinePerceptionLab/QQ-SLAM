@@ -19,7 +19,9 @@ class Quantize(nn.Module):
         self.eps = eps
 
         # embed = torch.randn(dim, n_embed)
-        embed = torch.rand(dim, n_embed) * (2.0 / self.n_embed) - 1.0 / self.n_embed
+        
+        embed = torch.bernoulli(torch.full((dim, n_embed), 0.5)).float() * 2 - 1  # Values in {-1, 1}
+        # embed = torch.rand(dim, n_embed) * (2.0 / self.n_embed) - 1.0 / self.n_embed
         self.register_buffer("embed", embed)
         self.register_buffer("cluster_size", torch.zeros(n_embed))
         self.register_buffer("embed_avg", embed.clone())
@@ -65,9 +67,10 @@ class Quantize(nn.Module):
             self.embed.data.copy_(embed_normalized)
 
         diff = (quantize.detach() - input).pow(2).mean()
+        diversity_loss = -torch.mean(torch.pdist(self.embed.t(), p=2))  # Diversity loss to prevent code collapse
         quantize = input + (quantize - input).detach()
 
-        return quantize, diff, torch.zeros((1)).cuda(), embed_ind
+        return quantize, diff, diversity_loss, embed_ind
 
     def embed_code(self, embed_id):
         return F.embedding(embed_id, self.embed.transpose(0, 1))
@@ -195,6 +198,8 @@ class JointEncoding(nn.Module):
 
         embedded_pos = self.embedpos_fn(inputs_flat)
         eval_tsdf = self.sample_point_features_by_linear_interp(query_points.clone(), tsdf_numpy, tsdf_bounds)
+        eval_tsdf = torch.tensor([0.]).to(inputs_flat.device).mean()
+
         if self.config["use_vq"]: 
             # quant_b = self.quantize_conv_b(embedded[...,None,None])
             quant_b, diff_b, pairwise_loss, embed_ind = self.quantize_b(embedded)
@@ -202,13 +207,14 @@ class JointEncoding(nn.Module):
         else:
             pairwise_loss = torch.tensor([0.]).to(embedded.device).mean()
             out = self.sdf_net(eval_tsdf, torch.cat([embedded, embedded_pos], dim=-1))
-        sdf, geo_feat = out[..., :1], out[..., 1:]
 
+        sdf, geo_feat = out[..., :1], out[..., 1:]
         sdf = torch.reshape(sdf, list(query_points.shape[:-1]))
+
         if not return_geo:
             if self.config["use_vq"] and return_id:
                 return quant_b, embed_ind
-            return sdf, pairwise_loss
+            return sdf
         geo_feat = torch.reshape(geo_feat, list(query_points.shape[:-1]) + [geo_feat.shape[-1]])
 
         return sdf, geo_feat
@@ -229,6 +235,9 @@ class JointEncoding(nn.Module):
 
         embed = self.embed_fn(inputs_flat)
         eval_tsdf = self.sample_point_features_by_linear_interp(query_points.clone(), tsdf_numpy, tsdf_bounds)
+        # eval_tsdf = torch.tanh(eval_tsdf)  # TSDF augmentation
+        # eval_tsdf = torch.tensor([0.]).to(embed.device).mean()
+
         if self.config["use_vq"]: 
             # quant_b = self.quantize_conv_b(embed[...,None,None])
             quant_b, diff_b, pairwise_loss, embed_ind = self.quantize_b(embed)
@@ -419,36 +428,62 @@ class JointEncoding(nn.Module):
 
         return ret
 
-    def sample_point_features_by_linear_interp(
-        self, coords,tsdf_numpy, origin
-    ):
-        """
-        coords: BN3
-        voxel_feats: BFXYZ
-        voxel_valid: BXYZ
-        grid_origin: B3
-        """
-        coords = coords.squeeze(-2)[None]
-        coords = coords * (self.bounding_box[:, 1] - self.bounding_box[:, 0]) + self.bounding_box[:, 0]
-        # # grid_origin = torch.tensor([[ 0.0768, -0.1560, -0.2050]], device=coords.device)
-        # # grid_origin = origin[None]
-        tsdf_numpy = tsdf_numpy.permute(0,1,4,3,2)
-        grid_origin = origin[:,0][None]
-        voxel_size = 4./256 #0.02 #0.04
-        crop_size_m = (
-            torch.tensor(tsdf_numpy.shape[2:], device=coords.device)
-            * voxel_size
-        )
-        coords = (
-            coords - grid_origin[:, None] + voxel_size / 2
-        ) / crop_size_m * 2 - 1
+    # def sample_point_features_by_linear_interp(
+    #     self, coords,tsdf_numpy, origin
+    # ):
+    #     """
+    #     coords: BN3
+    #     voxel_feats: BFXYZ
+    #     voxel_valid: BXYZ
+    #     grid_origin: B3
+    #     """
+    #     coords = coords.squeeze(-2)[None]
+    #     coords = coords * (self.bounding_box[:, 1] - self.bounding_box[:, 0]) + self.bounding_box[:, 0]
+    #     # # grid_origin = torch.tensor([[ 0.0768, -0.1560, -0.2050]], device=coords.device)
+    #     # # grid_origin = origin[None]
+    #     tsdf_numpy = tsdf_numpy.permute(0,1,4,3,2)
+    #     grid_origin = origin[:,0][None]
+    #     voxel_size = 4./256 #0.02 #0.04
+    #     crop_size_m = (
+    #         torch.tensor(tsdf_numpy.shape[2:], device=coords.device)
+    #         * voxel_size
+    #     )
+    #     coords = (
+    #         coords - grid_origin[:, None] + voxel_size / 2
+    #     ) / crop_size_m * 2 - 1
 
-        # point_feats = torch.nn.functional.grid_sample(
-        #     tsdf_numpy, #[None, None]
-        #     grid[None, None, :, :, [2, 1, 0]],
-        #     align_corners=False,
-        #     mode="bilinear",
-        #     padding_mode="zeros",
-        # )[0,:,0]
-        point_feats = grid_sample_3d(tsdf_numpy,coords[None, None, :, :, [2, 1, 0]])[0,:,0]
-        return point_feats #(48,n,1) (48,6144,96)
+    #     # point_feats = torch.nn.functional.grid_sample(
+    #     #     tsdf_numpy, #[None, None]
+    #     #     grid[None, None, :, :, [2, 1, 0]],
+    #     #     align_corners=False,
+    #     #     mode="bilinear",
+    #     #     padding_mode="zeros",
+    #     # )[0,:,0]
+    #     point_feats = grid_sample_3d(tsdf_numpy,coords[None, None, :, :, [2, 1, 0]])[0,:,0]
+    #     return point_feats #(48,n,1) (48,6144,96)
+    
+    def sample_point_features_by_linear_interp(
+        self, p, tsdf_volume, tsdf_bnds
+    ):
+        p_nor = self.normalize_3d_coordinate(p.clone(), tsdf_bnds)
+        p_nor = p_nor.unsqueeze(0)
+        vgrid = p_nor[:, :, None, None].float()
+        tsdf_value = grid_sample_3d(tsdf_volume.to(p.device), vgrid.to(p.device))[0,0,...,0]
+        return tsdf_value
+
+    def normalize_3d_coordinate(self, p, bound):
+        """
+        Normalize coordinate to [-1, 1], corresponds to the bounding box given.
+
+        Args:
+            p (tensor, N*3): coordinate.
+            bound (tensor, 3*2): the scene bound.
+
+        Returns:
+            p (tensor, N*3): normalized coordinate.
+        """
+        p = p.reshape(-1, 3)
+        p[:, 0] = ((p[:, 0]-bound[0, 0])/(bound[0, 1]-bound[0, 0]))*2-1.0
+        p[:, 1] = ((p[:, 1]-bound[1, 0])/(bound[1, 1]-bound[1, 0]))*2-1.0
+        p[:, 2] = ((p[:, 2]-bound[2, 0])/(bound[2, 1]-bound[2, 0]))*2-1.0
+        return p
