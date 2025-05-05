@@ -16,7 +16,7 @@ data:
 mapping:
   sample: 2048
   first_mesh: True
-  iters: 10
+  iters: 10 #20
   cur_frame_iters: 0
   lr_embed: 0.01
   lr_decoder: 0.01
@@ -25,7 +25,7 @@ mapping:
   keyframe_every: 5
   map_every: 5
   n_pixels: 0.05
-  first_iters: 200
+  first_iters: 200 #100
   optim_cur: True
   min_pixels_cur: 100
   map_accum_step: 1
@@ -99,6 +99,10 @@ training:
   trunc: 0.1
   rot_rep: 'axis_angle'
   rgb_missing: 0.05
+  quant_weight: 0.1
+  diversity_weight: 0.0001
+  lr_quant: 0.001
+
 
 mesh:
   resolution: 512
