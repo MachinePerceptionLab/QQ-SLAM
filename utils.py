@@ -48,19 +48,19 @@ def getVoxels(x_max, x_min, y_max, y_min, z_max, z_min, voxel_size=None, resolut
 
     return tx, ty, tz
 
-def get_batch_query_fn(query_fn, num_args=1, device=None):
+def get_batch_query_fn(query_fn, num_args=1, device=None,tsdf_numpy=None, tsdf_bounds=None):
 
     if num_args == 1:
-        fn = lambda f, i0, i1: query_fn(f[i0:i1, None, :].to(device))
+        fn = lambda f, i0, i1: query_fn(f[i0:i1, None, :].to(device),tsdf_numpy,tsdf_bounds)
     else:
-        fn = lambda f, f1, i0, i1: query_fn(f[i0:i1, None, :].to(device), f1[i0:i1, :].to(device))
+        fn = lambda f, f1, i0, i1: query_fn(f[i0:i1, None, :].to(device), f1[i0:i1, :].to(device),tsdf_numpy,tsdf_bounds)
 
 
     return fn
 
 #### NeuralRGBD ####
 @torch.no_grad()
-def extract_mesh(query_fn, config, bounding_box, marching_cube_bound=None, color_func = None, voxel_size=None, resolution=None, isolevel=0.0, scene_name='', mesh_savepath=''):
+def extract_mesh(query_fn, config, bounding_box, marching_cube_bound=None, color_func = None, voxel_size=None, resolution=None, isolevel=0.0, scene_name='', mesh_savepath='',tsdf_numpy=None, tsdf_bounds=None):
     '''
     Extracts mesh from the scene model using marching cubes (Adapted from NeuralRGBD)
     '''
@@ -82,7 +82,7 @@ def extract_mesh(query_fn, config, bounding_box, marching_cube_bound=None, color
     if config['grid']['tcnn_encoding']:
         flat = (flat - bounding_box_cpu[:, 0]) / (bounding_box_cpu[:, 1] - bounding_box_cpu[:, 0])
 
-    fn = get_batch_query_fn(query_fn, device=bounding_box.device)
+    fn = get_batch_query_fn(query_fn, device=bounding_box.device,tsdf_numpy=tsdf_numpy, tsdf_bounds=tsdf_bounds)
 
     chunk = 1024 * 64
     raw = [fn(flat, i, i + chunk).cpu().data.numpy() for i in range(0, flat.shape[0], chunk)]
@@ -116,7 +116,7 @@ def extract_mesh(query_fn, config, bounding_box, marching_cube_bound=None, color
             vert_flat = (torch.from_numpy(vertices).to(bounding_box) - bounding_box[:, 0]) / (bounding_box[:, 1] - bounding_box[:, 0])
 
 
-        fn_color = get_batch_query_fn(color_func, 1)
+        fn_color = get_batch_query_fn(color_func, 1,tsdf_numpy=tsdf_numpy, tsdf_bounds=tsdf_bounds)
 
         chunk = 1024 * 64
         raw = [fn_color(vert_flat,  i, i + chunk).cpu().data.numpy() for i in range(0, vert_flat.shape[0], chunk)]
@@ -131,7 +131,7 @@ def extract_mesh(query_fn, config, bounding_box, marching_cube_bound=None, color
         print('rendering surface color')
         mesh = trimesh.Trimesh(vertices, triangles, process=False)
         vertex_normals = torch.from_numpy(mesh.vertex_normals)
-        fn_color = get_batch_query_fn(color_func, 2, device=bounding_box.device)
+        fn_color = get_batch_query_fn(color_func, 2, device=bounding_box.device,tsdf_numpy=tsdf_numpy, tsdf_bounds=tsdf_bounds)
         raw = [fn_color(torch.from_numpy(vertices), vertex_normals,  i, i + chunk).cpu().data.numpy() for i in range(0, vertices.shape[0], chunk)]
 
         sh = vertex_normals.shape
