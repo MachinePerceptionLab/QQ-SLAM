@@ -1,5 +1,5 @@
 # QQ-SLAM: Query Quantized Neural SLAM <br />
-# [Project page](https://machineperceptionlab.github.io/QQ-SLAM-page/)| [Paper](https://arxiv.org/abs/2412.16476)
+> [Project page](https://machineperceptionlab.github.io/QQ-SLAM-page/)| [Paper](https://arxiv.org/abs/2412.16476)
 > AAAI 2025
 
 
